@@ -1,0 +1,178 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: AWS resources for encrypting application code and storing it in an external account's S3 bucket
+
+Parameters:
+  CodeCommitRepositoryName:
+    Type: String
+    Description: CodeCommit repository name where the encryptor script and the application is stored
+    MinLength: 1
+
+  AppCodeDirectoryName:
+    Type: String
+    Description: CodeCommit repository path for the application (part of CodeCommitRepositoryName)
+    MinLength: 1
+
+  EncryptionKeyAlias:
+    Type: String
+    Description: Alias for the new AWS KMS CMK key that will be created
+    MinLength: 1
+    Default: "alias/enclavekey"
+
+  ExternalBucketName:
+    Type: String
+    Description: S3 bucket name to use for sharing files
+    MinLength: 1
+
+  ExternalBucketPath:
+    Type: String
+    Description: S3 path inside bucket where to store the encrypted application zip file
+    MinLength: 1
+    Default: "encrypted"
+
+  ExternalBucketEncryptionKeyArn:
+    Type: String
+    Description: ARN for the external bucket encryption key
+    MinLength: 1
+
+  ExternalBucketAWSAccountNumber:
+    Type: String
+    Description: AWS account number
+    MinLength: 12
+    MaxLength: 12
+    AllowedPattern: "[0-9]+"
+
+Resources:
+  EnclaveKMSCMK:
+    Type: AWS::KMS::Key
+    Properties:
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Id: KeyDefault
+        Statement:
+        - Sid: Enable default permissions
+          Effect: Allow
+          Principal:
+            AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+          Action:
+            - "kms:*"
+          Resource: '*'
+        - Sid: "Required by kmstool-enclave-cli as a prerequisite for the parent EC2 instance that's running the enclave. Decryption from parent EC2 instance will not be allowed as long as a secondary policy exists with a Condition restricting decryption."
+          Effect: Allow
+          Principal:
+            AWS: !Sub "arn:aws:iam::${ExternalBucketAWSAccountNumber}:root"
+          Action: kms:Decrypt
+          Resource: '*'
+        - Sid: "Required by kmstool-enclave-cli. Restrict decryption to now only work from the enclave."
+          Effect: Deny
+          Principal:
+            AWS: !Sub "arn:aws:iam::${ExternalBucketAWSAccountNumber}:root"
+          Action: kms:Decrypt
+          Resource: '*'
+          Condition:
+            StringNotEqualsIgnoreCase:
+              'kms:RecipientAttestation:ImageSha384': "PCR0_HASH_TO_BE_UPDATED_BY_NITRO_IMAGE_BUILDER"
+
+  EnclaveKMSCMKAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Ref EncryptionKeyAlias
+      TargetKeyId: !Ref EnclaveKMSCMK
+
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "Asterisks are required"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: CodeBuildPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: CloudWatchLogsPolicy
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - "*"
+              - Sid: CodeCommitPolicy
+                Effect: Allow
+                Action:
+                  - "codecommit:GitPull"
+                Resource:
+                  - !Sub "arn:aws:codecommit:${AWS::Region}:${AWS::AccountId}:${CodeCommitRepositoryName}"
+              - Sid: S3WritePolicy
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                Resource:
+                  - !Sub "arn:aws:s3:::${ExternalBucketName}/*"
+              - Sid: KMSAccessPolicy
+                Effect: Allow
+                Action:
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                Resource:
+                  - !GetAtt EnclaveKMSCMK.Arn
+              - Sid: KMSAccessPolicyExternalKey
+                Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                Resource:
+                  - !Ref ExternalBucketEncryptionKeyArn
+
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W32
+            reason: "No build output artifacts to encrypt"
+    Properties:
+      Name: application-encryptor
+      Description: The project uses a KMS key that was created alongside it to encrypt the application given. It then uploads the encrypted application to the provided target location.
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Type: ARM_CONTAINER
+        Image: "aws/codebuild/amazonlinux2-aarch64-standard:2.0"
+      Source:
+        BuildSpec: !Sub |
+            version: 0.2
+            phases:
+              install:
+                commands:
+                  - "echo 'Installing required packages'"
+                  - "pip3 install cryptography"
+              build:
+                commands:
+                  - "echo 'Encrypting application code'"
+                  - "python3 envelope_encryptor.py encrypt -d ${AppCodeDirectoryName} -k ${EncryptionKeyAlias}"
+                  - "aws s3api put-object --bucket ${ExternalBucketName} --key ${ExternalBucketPath}/application_code.zip.encrypted --body application_code.zip.encrypted --expected-bucket-owner ${ExternalBucketAWSAccountNumber} --acl bucket-owner-full-control --server-side-encryption aws:kms --ssekms-key-id ${ExternalBucketEncryptionKeyArn}"
+        Type: CODECOMMIT
+        Location: !Sub "https://git-codecommit.${AWS::Region}.amazonaws.com/v1/repos/${CodeCommitRepositoryName}"
+
+Outputs:
+  EnclaveKeyARN:
+    Description: ARN of KMS CMK Key used to envelope encrypt the application code
+    Value: !GetAtt EnclaveKMSCMK.Arn
+    Export:
+      Name: EnclaveKeyARN

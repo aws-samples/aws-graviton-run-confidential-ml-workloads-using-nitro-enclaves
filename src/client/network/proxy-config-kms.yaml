@@ -1,0 +1,4 @@
+# Check KMS endpoints at: https://docs.aws.amazon.com/general/latest/gr/kms.html
+allowlist:
+- {address: kms.eu-west-1.amazonaws.com, port: 443}
+- {address: kms-fips.eu-west-1.amazonaws.com, port: 443}

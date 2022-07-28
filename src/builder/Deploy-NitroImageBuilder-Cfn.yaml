@@ -1,0 +1,137 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: AWS resources for building and storing a nitro enclave image file in an external S3 bucket
+
+Parameters:
+  CodeCommitRepositoryName:
+    Type: String
+    Description: CodeCommit repository name that contains the server application files
+    MinLength: 1
+
+  ExternalBucketName:
+    Type: String
+    Description: S3 bucket name to use for sharing files
+    MinLength: 1
+
+  ExternalBucketPath:
+    Type: String
+    Description: S3 path inside bucket where to store the nitro enclave image
+    MinLength: 1
+    Default: "enclave"
+
+  ExternalBucketEncryptionKeyArn:
+    Type: String
+    Description: ARN for the external bucket encryption key
+    MinLength: 1
+
+  ExternalBucketAWSAccountNumber:
+    Type: String
+    Description: AWS account number
+    MinLength: 12
+    MaxLength: 12
+    AllowedPattern: "[0-9]+"
+
+Resources:
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "Asterisks are required"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: CodeBuildPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: CloudWatchLogsPolicy
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - "*"
+              - Sid: CodeCommitPolicy
+                Effect: Allow
+                Action:
+                  - "codecommit:GitPull"
+                Resource:
+                  - !Sub "arn:aws:codecommit:${AWS::Region}:${AWS::AccountId}:${CodeCommitRepositoryName}"
+              - Sid: S3WritePolicy
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                Resource:
+                  - !Sub "arn:aws:s3:::${ExternalBucketName}/*"
+              - Sid: KMSPolicy
+                Effect: Allow
+                Action:
+                  - kms:GetKeyPolicy
+                  - kms:PutKeyPolicy
+                Resource:
+                  - !ImportValue EnclaveKeyARN
+              - Sid: KMSAccessPolicyExternalKey
+                Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                Resource:
+                  - !Ref ExternalBucketEncryptionKeyArn
+
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W32
+            reason: "No build output artifacts to encrypt"
+    Properties:
+      Name: nitro-image-builder
+      Description: The project generates an enclave image file and uploads it to the provided target location. It also updates the KMS key resource policy to restrict decryption using the enclave's security attestation.
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        ComputeType: BUILD_GENERAL1_LARGE
+        Type: ARM_CONTAINER
+        Image: "aws/codebuild/amazonlinux2-aarch64-standard:2.0"
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: ENCLAVE_KEY_ARN
+            Value: !ImportValue EnclaveKeyARN
+      Source:
+        BuildSpec: !Sub |
+            version: 0.2
+            phases:
+              install:
+                commands:
+                  - "echo 'Installing required packages'"
+                  - "PYTHON=python2 amazon-linux-extras install -y aws-nitro-enclaves-cli"
+                  - "yum install aws-nitro-enclaves-cli-devel -y"
+              build:
+                commands:
+                  - "echo 'Building enclave base image'"
+                  - "docker build -t enclavebase containers/enclave_base"
+                  - "echo 'Building enclave app image (Nitro) from enclave base'"
+                  - "nitro-cli build-enclave --docker-uri enclaveapp --docker-dir containers/enclave_app --output-file nitro-enclave-image.eif > nitro_output.txt"
+                  - "echo 'Writing enclave image file to the S3 bucket specified'"
+                  - "aws s3api put-object --bucket ${ExternalBucketName} --key ${ExternalBucketPath}/nitro-enclave-image.eif --body nitro-enclave-image.eif --expected-bucket-owner ${ExternalBucketAWSAccountNumber} --acl bucket-owner-full-control --server-side-encryption aws:kms --ssekms-key-id ${ExternalBucketEncryptionKeyArn}"
+              post_build:
+                commands:
+                  - "echo 'Updating key policy to allow enclave to decrypt with it'"
+                  - "aws kms get-key-policy --key-id $ENCLAVE_KEY_ARN --policy-name default --region ${AWS::Region} --query Policy --output text > key_policy.txt"
+                  - "sed -Ei.tmp 's/\"kms:RecipientAttestation:ImageSha384\" :.*/\"kms:RecipientAttestation:ImageSha384\" : '\"$(cat nitro_output.txt | jq '.[] | .PCR0')/g\" key_policy.txt"
+                  - "aws kms put-key-policy --key-id $ENCLAVE_KEY_ARN --policy-name default --region ${AWS::Region} --policy file://key_policy.txt"
+        Type: CODECOMMIT
+        Location: !Sub "https://git-codecommit.${AWS::Region}.amazonaws.com/v1/repos/${CodeCommitRepositoryName}"
