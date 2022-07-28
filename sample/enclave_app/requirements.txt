@@ -3,5 +3,5 @@ tensorflow-probability==0.16.0
 protobuf==3.20.1
 onnx==1.11.0
 onnx_tf==1.10.0
-numpy==1.21.6
+numpy==1.22.0
 pillow==9.1.1
