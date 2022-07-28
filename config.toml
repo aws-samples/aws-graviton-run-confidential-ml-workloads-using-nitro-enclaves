@@ -1,0 +1,77 @@
+languageCode = 'en-us'
+title = 'Run Confidential ML Workloads using AWS Nitro Enclaves'
+theme = "learn"
+uglyurls = true
+sectionPagesMenu = "main"
+pygmentsCodeFences = true
+
+[params]
+themeVariant = "custom"
+showVisitedLinks = true
+description = "Run Confidential ML Workloads using AWS Nitro Enclaves"
+disableSearch = true
+disableAssetsBusting = false
+disableLanguageSwitchingButton = false
+disableShortcutsTitle = false
+disableInlineCopyToClipBoard = true
+disableLandingPageButton = true
+ghrepo = "https://github.com/aws-samples/aws-graviton-run-confidential-ml-workloads-using-nitro-enclaves"
+branch = "blog"
+
+[outputs]
+home = [ "HTML", "AMP", "RSS", "JSON"]
+page = [ "HTML", "AMP"]
+
+# All privacy options enabled. There should not be
+# any cookies or privacy
+[privacy]
+  [privacy.disqus]
+    disable = false
+  [privacy.googleAnalytics]
+    anonymizeIP = true
+    disable = true
+    respectDoNotTrack = true
+    useSessionStorage = false
+  [privacy.instagram]
+    disable = true
+    simple = false
+  [privacy.twitter]
+    disable = true
+    enableDNT = false
+    simple = false
+  [privacy.vimeo]
+    disable = true
+    simple = false
+  [privacy.youtube]
+    disable = false
+    # This is required to avoid cookies on youtube integration
+    privacyEnhanced = true
+
+[[menu.shortcuts]]
+name = "<i class='fas fa-external-link-alt'></i> AWS Nitro Enclaves"
+url = "https://aws.amazon.com/ec2/nitro/nitro-enclaves/"
+weight = 10
+
+[[menu.shortcuts]]
+name = "<i class='fas fa-external-link-alt'></i> AWS Graviton"
+url = "https://aws.amazon.com/ec2/graviton/"
+weight = 20
+
+[languages]
+  [languages.en]
+    languageName = "English"
+    weight = 1
+
+[markup]
+  [markup.highlight]
+    anchorLineNos = false
+    codeFences = true
+    guessSyntax = false
+    hl_Lines = ''
+    lineAnchors = ''
+    lineNoStart = 1
+    lineNos = false
+    lineNumbersInTable = true
+    noClasses = true
+    style = 'monokai'
+    tabWidth = 4
