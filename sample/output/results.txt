@@ -1,0 +1,1 @@
+{'kitten.jpg': [{'class': 'n02123159 tiger cat', 'prob': 0.5861893892288208}, {'class': 'n02123045 tabby, tabby cat', 'prob': 0.30448541045188904}, {'class': 'n02124075 Egyptian cat', 'prob': 0.08718861639499664}, {'class': 'n02129604 tiger, Panthera tigris', 'prob': 0.0032388896215707064}, {'class': 'n02128385 leopard, Panthera pardus', 'prob': 0.0017968295142054558}]}

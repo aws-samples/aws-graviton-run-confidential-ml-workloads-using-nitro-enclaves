@@ -1,0 +1,177 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Creates Amazon S3 bucket shared with 3rd party so they can upload encrypted application code and Nitro image files
+
+Parameters:
+  ThirdPartyIdentifier:
+    Type: String
+    Description: Short identifier for the third party
+    MinLength: 1
+    MaxLength: 20
+
+  ThirdPartyAWSAccountNumber:
+    Type: String
+    Description: AWS account number for third party
+    MinLength: 12
+    MaxLength: 12
+    AllowedPattern: "[0-9]+"
+
+Resources:
+  AccessLogsBucket:
+    Type: AWS::S3::Bucket
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W35
+            reason: S3 bucket hosting access logs shouldn't have access logging configured
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: True
+        BlockPublicPolicy: True
+        IgnorePublicAcls: True
+        RestrictPublicBuckets: True
+
+  AccessLogsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AccessLogsBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: S3ServerAccessLogsPolicy-ThirdPartyBucket
+            Action:
+              - 's3:PutObject'
+            Effect: Allow
+            Resource: !Sub "arn:aws:s3:::${AccessLogsBucket}/logs-third-party-bucket*"
+            Principal:
+              Service: logging.s3.amazonaws.com
+            Condition:
+              ArnLike:
+                'aws:SourceArn':
+                  - !GetAtt ThirdPartyBucket.Arn
+              StringEquals:
+                'aws:SourceAccount':
+                  -  !Sub "${AWS::AccountId}"
+
+  ThirdPartyBucketKMSCMK:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub Key used for S3 bucket shared with ${ThirdPartyIdentifier}
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Id: KeyDefault
+        Statement:
+        - Sid: Enable default permissions
+          Effect: Allow
+          Principal:
+            AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+          Action:
+            - "kms:*"
+          Resource: '*'
+        - Sid: !Sub Enable Access From ${ThirdPartyIdentifier} Account ${ThirdPartyAWSAccountNumber}
+          Effect: Allow
+          Principal:
+            AWS:
+              - !Sub 'arn:aws:iam::${ThirdPartyAWSAccountNumber}:root'
+          Action:
+            - kms:Decrypt
+            - kms:GenerateDataKey
+          Resource: '*'
+
+  ThirdPartyBucketKMSCMKAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub alias/${ThirdPartyIdentifier}-bucket-key-alias
+      TargetKeyId: !Ref ThirdPartyBucketKMSCMK
+
+  ThirdPartyBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      LoggingConfiguration:
+        DestinationBucketName: !Ref AccessLogsBucket
+        LogFilePrefix: logs-third-party-bucket
+      BucketName: !Sub ${ThirdPartyIdentifier}-code-bucket-${AWS::AccountId}-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !GetAtt ThirdPartyBucketKMSCMK.Arn
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: True
+        BlockPublicPolicy: True
+        IgnorePublicAcls: True
+        RestrictPublicBuckets: True
+      VersioningConfiguration:
+        Status: Enabled
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+
+  ThirdPartyBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ThirdPartyBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: DenyIncorrectEncryption
+            Action:
+              - s3:PutObject
+            Effect: Deny
+            Resource: !Sub '${ThirdPartyBucket.Arn}/*'
+            Principal: '*'
+            Condition:
+              StringNotEquals:
+                "s3:x-amz-server-side-encryption": "aws:kms"
+          - Sid: DenyUnencrypted
+            Action:
+              - s3:PutObject
+            Effect: Deny
+            Resource: !Sub '${ThirdPartyBucket.Arn}/*'
+            Principal: '*'
+            Condition:
+              "Null":
+                "s3:x-amz-server-side-encryption": true
+          - Sid: DenyNonHTTPSReqs
+            Action:
+              - s3:*
+            Effect: Deny
+            Resource:
+              - !Sub '${ThirdPartyBucket.Arn}'
+              - !Sub '${ThirdPartyBucket.Arn}/*'
+            Principal: '*'
+            Condition:
+              "Bool":
+                "aws:SecureTransport": false
+          - Sid: EnableThirdPartyAccess
+            Principal:
+              AWS:
+                - !Sub 'arn:aws:iam::${ThirdPartyAWSAccountNumber}:root'
+            Action:
+              - s3:PutObject
+              - s3:PutObjectAcl
+            Effect: Allow
+            Resource:
+              - !Sub '${ThirdPartyBucket.Arn}/*'
+            Condition:
+              "StringEquals":
+                "s3:x-amz-acl": "bucket-owner-full-control"
+
+Outputs:
+  ThirdPartyBucketKMSCMKArn:
+    Description: ARN of KMS CMK Key used to encrypt the third party bucket
+    Value: !GetAtt ThirdPartyBucketKMSCMK.Arn
+
+  ThirdPartyBucketKMSCMKAlias:
+    Description: Alias of KMS CMK Key used to encrypt the third party bucket
+    Value: !Ref ThirdPartyBucketKMSCMKAlias
+
+  ThirdPartyBucketArn:
+    Description: ARN of the S3 bucket created for the third party
+    Value: !GetAtt ThirdPartyBucket.Arn
