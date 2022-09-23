@@ -1,6 +1,6 @@
 tensorflow==2.9.0
 tensorflow-probability==0.16.0
-protobuf==3.20.1
+protobuf==3.20.2
 onnx==1.11.0
 onnx_tf==1.10.0
 numpy==1.22.0
