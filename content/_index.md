@@ -54,7 +54,7 @@ with two applications for client-server communication that enable this feature.
 
 ## Shared Responsibility
 
-![Shared responsability](/images/blog_post_nitro_enclaves/shared-responsability.png)
+![Shared responsability](/images/shared-responsability.png)
 
 An owner is responsible for protecting their files by encrypting them and providing the enclave
 file in which an application user can run the encrypted application without seeing the plaintext
@@ -121,7 +121,7 @@ Once high-level consensus is established between two parties willing to collabor
 they will use this solution to enable the security guardrails required to share sensitive artefacts.
 The AWS environment setup is shown in the diagram below.
 
-![Architecture diagram](/images/blog_post_nitro_enclaves/solution-architecture-diagram.png)
+![Architecture diagram](/images/solution-architecture-diagram.png)
 
 The **high-level workflow** is the following:
 1.	An application user creates and shares an Amazon S3 bucket with the application owner in
@@ -158,7 +158,7 @@ To enable our use cases, we need the following components:
 1.	A client application to run from the EC2 Linux instance to send instructions to the enclave
 1.	A server application to restrict what software the enclave can run and how
 
-![Client server diagram](/images/blog_post_nitro_enclaves/client-server-diagram.png)
+![Client server diagram](/images/client-server-diagram.png)
 
 The client and server applications communicate through remote procedure calls (RPC) leveraging vsock
 sockets. RPC functionality was added to support a FUSE virtual file system that intercepts Linux filesystem
@@ -223,4 +223,4 @@ please check the [official user guide](https://docs.aws.amazon.com/enclaves/late
 
 ### Business Process
 
-![Business process](/images/blog_post_nitro_enclaves/solution-business-process.png)
+![Business process](/images/solution-business-process.png)

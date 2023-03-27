@@ -5,6 +5,9 @@ uglyurls = true
 sectionPagesMenu = "main"
 pygmentsCodeFences = true
 
+baseURL = "https://aws-samples.github.io/aws-graviton-run-confidential-ml-workloads-using-nitro-enclaves/"
+canonifyURLs = true
+
 [params]
 themeVariant = "custom"
 showVisitedLinks = true
