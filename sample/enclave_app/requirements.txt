@@ -1,4 +1,4 @@
 tensorflow==2.11.1
 tensorflow-io==0.27.0
 numpy==1.21.6
-Pillow==10.0.1
+Pillow==10.2.0
